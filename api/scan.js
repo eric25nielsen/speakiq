@@ -33,7 +33,7 @@ module.exports = async function handler(req, res) {
   let opportunities = []
   try {
     const msg = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-5',
       max_tokens: 4000,
       system: `You are a speaking engagement extraction assistant. Parse the iCal (.ics) calendar data and extract EVERY VEVENT as a speaking engagement opportunity.
 
