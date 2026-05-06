@@ -9,7 +9,7 @@ module.exports = async function handler(req, res) {
   const { url, icpGenres = [], calendarMonth = '' } = req.body || {}
   if (!url) return res.status(400).json({ error: 'url is required' })
 
-  // ── 1. Fetch the iCal file server-side ──────────────────────────────────────
+  // 1. Fetch the iCal file server-side
   let icalText
   try {
     const fetchUrl = url.replace(/^webcal:\/\//i, 'https://')
@@ -27,34 +27,37 @@ module.exports = async function handler(req, res) {
     return res.status(400).json({ error: 'URL did not return valid iCal data. Make sure it is a public calendar URL.' })
   }
 
-  // ── 2. Parse with Anthropic ──────────────────────────────────────────────────
+  // 2. Parse with Anthropic
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  const genres = icpGenres.join(', ')
 
   let opportunities = []
   try {
     const msg = await client.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 4000,
-      system: `You are a speaking engagement extraction assistant. Parse the iCal (.ics) calendar data and extract EVERY VEVENT as a speaking engagement opportunity.
+      system: `You are a speaking engagement extraction assistant. Parse the iCal (.ics) calendar data carefully and extract EVERY VEVENT.
 
-Return ONLY a raw JSON array (no markdown, no backticks, no explanation) where each object has:
-- title: event/engagement name
-- date: full date and time string
-- location: city, state, venue name
-- contactName: primary contact person's full name
-- contactEmail: contact email address
-- contactPhone: contact phone number
-- genre: best single match from: ${icpGenres.join(', ')} — or infer from content
-- audience: audience type or expected size  
-- fee: honorarium or speaking fee if mentioned
-- format: keynote / panel / workshop / breakout / webinar / emcee / etc.
-- organization: hosting organization or association name
-- details: full description including requirements, deadlines, or notes
+IMPORTANT: The DTSTART/DTEND fields are the calendar entry dates (often when the listing was posted), NOT the actual event date. The REAL event date, location, contact info, and all details are inside the DESCRIPTION field of each VEVENT. Read every DESCRIPTION field very carefully.
 
-Use null for unknown fields. Return [] if no events are found.`,
+Return ONLY a raw JSON array (no markdown, no backticks, no explanation) where each object has exactly these keys:
+- title: event name from SUMMARY field
+- date: the REAL event date found inside DESCRIPTION (e.g. "March 2027", "October 19-20, 2026") — NOT the DTSTART value
+- location: city, state, venue name extracted from DESCRIPTION
+- contactName: full name of contact person from DESCRIPTION
+- contactEmail: email address from DESCRIPTION
+- contactPhone: phone number from DESCRIPTION
+- genre: best single match from: ${genres} — infer from event content and audience
+- audience: who attends, audience type, industry, or expected size from DESCRIPTION
+- fee: honorarium, speaking fee, or stipend from DESCRIPTION
+- format: keynote / panel / workshop / breakout / webinar / emcee / general session / etc.
+- organization: hosting association, company, or group name from DESCRIPTION
+- details: the COMPLETE raw text of the DESCRIPTION field — include everything verbatim, do not truncate or summarize
+
+Use null for unknown fields. Return [] if no events found.`,
       messages: [{
         role: 'user',
-        content: `Parse this iCal calendar data and extract all speaking engagement opportunities:\n\n${icalText.slice(0, 14000)}`
+        content: `Parse this iCal data. For each VEVENT, read the DESCRIPTION field carefully — it contains the real event date, location, contact, and all details:\n\n${icalText.slice(0, 16000)}`
       }]
     })
 
