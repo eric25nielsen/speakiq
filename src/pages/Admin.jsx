@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase.js'
 import Nav from '../components/Nav.jsx'
+import SyncTab from '../components/SyncTab.jsx'
 
 const C = {
   bg:'#0d0f14', surface:'#13151c', border:'#1e2130',
@@ -265,133 +266,7 @@ export default function Admin({ session, profile }) {
 
         {/* ── SYNC TAB ── */}
         {tab === 'sync' && (
-          <div>
-            <h2 style={{ color:C.gold, fontWeight:'normal', fontSize:21, marginBottom:4 }}>Sync Speaking Calendar</h2>
-            <p style={{ color:C.dim, fontSize:14, lineHeight:1.7, marginBottom:24 }}>
-              Load this month's calendar from email or by pasting a URL. Preview the events, then import them to make them live for all users.
-            </p>
-
-            {/* Source buttons */}
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10, marginBottom:20 }}>
-              {[
-                { icon:'✉️', label:'Scan Email',   sub:'Find Jennifer\'s latest invite', onClick:()=>scanEmail(false), gold:true,  busy:scanning },
-                { icon:'🔍', label:'Deep Search',  sub:'Search all past emails',          onClick:()=>scanEmail(true),  busy:scanning },
-                { icon:'🔗', label:'Paste URL',    sub:'Enter a calendar link manually',  onClick:()=>setSyncMode('url') },
-              ].map(b=>(
-                <button key={b.label} onClick={b.onClick} disabled={b.busy||loading}
-                  style={{ background: b.gold?`linear-gradient(135deg,#c9a84c,${C.gold})`:C.surface, color: b.gold?C.bg:C.text, border: b.gold?'none':`1px solid ${C.border}`, borderRadius:10, padding:'14px 10px', cursor:(b.busy||loading)?'not-allowed':'pointer', fontFamily:'inherit', textAlign:'center', opacity:(b.busy||loading)?0.6:1, transition:'all 0.15s' }}>
-                  <div style={{ fontSize:20, marginBottom:5 }}>{b.busy?'⟳':b.icon}</div>
-                  <div style={{ fontSize:13, fontWeight:'bold', marginBottom:2 }}>{b.label}</div>
-                  <div style={{ fontSize:11, color: b.gold?'rgba(0,0,0,0.6)':C.dim }}>{b.sub}</div>
-                </button>
-              ))}
-            </div>
-
-            {/* URL input */}
-            <div style={{ display:'flex', flexDirection:'column', gap:12, marginBottom:16 }}>
-              <div>
-                <label style={{ fontSize:11, color:C.muted, display:'block', marginBottom:6, textTransform:'uppercase', letterSpacing:'0.07em' }}>Calendar URL</label>
-                <input style={inp} value={icalUrl} onChange={e=>setIcalUrl(e.target.value)} placeholder="webcal:// or https://calendar.google.com/…" />
-              </div>
-              <div style={{ display:'flex', gap:10, alignItems:'flex-end' }}>
-                <div style={{ flex:1 }}>
-                  <label style={{ fontSize:11, color:C.muted, display:'block', marginBottom:6, textTransform:'uppercase', letterSpacing:'0.07em' }}>Month Label</label>
-                  <input style={{ ...inp, width:'auto', minWidth:160 }} value={monthLabel} onChange={e=>setMonth(e.target.value)} placeholder="e.g. May2026" />
-                </div>
-                <button style={btn(loading||!icalUrl||!monthLabel)} disabled={loading||!icalUrl||!monthLabel} onClick={runScan}>
-                  {loading ? '⟳ Scanning…' : 'Fetch & Preview'}
-                </button>
-                {preview.length > 0 && !saved && (
-                  <button style={btn(saving,'secondary')} disabled={saving} onClick={saveToDb}>
-                    {saving ? 'Saving…' : `✓ Import ${preview.length} →`}
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Log */}
-            {statusLog.length > 0 && (
-              <div style={{ marginBottom:16 }}>
-                {statusLog.map((msg,i)=>(
-                  <div key={i} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:5, padding:'7px 14px', marginBottom:5, fontSize:12, fontFamily:'monospace', color:msg.includes('✓')?C.green:msg.includes('✗')||msg.includes('⚠')?C.red:C.muted }}>
-                    {msg}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Preview grid */}
-            {preview.length > 0 && (
-              <div style={{ marginBottom:28 }}>
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
-                  <div style={{ fontSize:13, color:C.dim }}>
-                    <strong style={{ color:C.text }}>{preview.length}</strong> opportunities found
-                    {saved && <span style={{ color:C.green, marginLeft:10 }}>✓ Imported — live for all users</span>}
-                  </div>
-                  {/* Stats */}
-                  <div style={{ display:'flex', gap:12 }}>
-                    {[
-                      { l:'High ICP', v:preview.filter(o=>o.icp_score>=75).length, gold:true },
-                      { l:'Has Contact', v:preview.filter(o=>o.contactEmail||o.contact_email).length },
-                    ].map(s=>(
-                      <div key={s.l} style={{ textAlign:'right' }}>
-                        <span style={{ fontSize:16, fontWeight:'bold', color:s.gold?C.gold:C.text }}>{s.v}</span>
-                        <span style={{ fontSize:11, color:C.dim, marginLeft:5 }}>{s.l}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-                  {preview.map((opp,i)=>{
-                    const sc = opp.icp_score||0
-                    const color = sc>=75?C.green:sc>=45?C.orange:C.red
-                    return (
-                      <div key={i} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:'12px 16px', display:'flex', gap:12, alignItems:'flex-start' }}>
-                        <div style={{ background:color, color:sc>=75?'#003d2e':'#fff', borderRadius:20, padding:'2px 10px', fontSize:11, fontWeight:'bold', whiteSpace:'nowrap', marginTop:2 }}>{sc}%</div>
-                        <div style={{ flex:1 }}>
-                          <div style={{ fontSize:13, color:C.text, fontWeight:'bold' }}>{opp.title||'Untitled'}</div>
-                          <div style={{ display:'flex', gap:10, flexWrap:'wrap', fontSize:11, color:C.dim, marginTop:3 }}>
-                            {opp.genre        && <span style={{ color:C.gold }}>◆ {opp.genre}</span>}
-                            {opp.date         && <span>📅 {opp.date}</span>}
-                            {opp.location     && <span>📍 {opp.location}</span>}
-                            {opp.organization && <span>🏢 {opp.organization}</span>}
-                            {(opp.contactEmail||opp.contact_email) && <span style={{ color:C.green }}>✓ Has contact</span>}
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-                {!saved && (
-                  <button style={{ ...btn(saving), marginTop:14, width:'100%' }} disabled={saving} onClick={saveToDb}>
-                    {saving ? '⟳ Importing…' : `✓ Import All ${preview.length} Opportunities — Make Live for Everyone`}
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* Sync history */}
-            {syncHistory.length > 0 && (
-              <div>
-                <div style={{ fontSize:12, color:C.dim, textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:10 }}>Sync History</div>
-                <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-                  {syncHistory.map(s=>{
-                    const badge = statusBadge(s.status)
-                    return (
-                      <div key={s.id} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:'10px 16px', display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
-                        <div style={{ background:badge.bg, color:badge.color, borderRadius:20, padding:'2px 10px', fontSize:11, fontWeight:'bold' }}>{badge.label}</div>
-                        <div style={{ flex:1 }}>
-                          <span style={{ fontSize:13, color:C.text }}>{s.calendar_name||s.month_label}</span>
-                          {s.event_count != null && <span style={{ fontSize:12, color:C.dim, marginLeft:10 }}>{s.event_count} events</span>}
-                        </div>
-                        <span style={{ fontSize:11, color:C.dimmer }}>{timeAgo(s.imported_at||s.created_at)}</span>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
+          <SyncTab session={session} icpGenres={icpGenres} />
         )}
 
         {/* ── USERS ── */}
