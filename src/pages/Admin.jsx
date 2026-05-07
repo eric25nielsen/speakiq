@@ -274,8 +274,9 @@ export default function Admin({ session, profile }) {
                 <div>
                   <label style={{ fontSize:11, color:C.muted, display:'block', marginBottom:6 }}>ROLE</label>
                   <select value={inviteRole} onChange={e=>setInviteRole(e.target.value)} style={{ ...inp, width:'auto', paddingRight:24 }}>
-                    <option value="viewer">Viewer</option>
-                    <option value="admin">Admin</option>
+                    <option value="viewer">Viewer — sees dashboard only</option>
+                    <option value="syncer">Syncer — loads calendar from email</option>
+                    <option value="admin">Admin — full access</option>
                   </select>
                 </div>
                 <button style={btn(inviting||!inviteEmail)} disabled={inviting||!inviteEmail} onClick={inviteUser}>
@@ -297,8 +298,9 @@ export default function Admin({ session, profile }) {
                   {u.id !== session.user.id ? (
                     <select value={u.role||'viewer'} onChange={e=>updateRole(u.id,e.target.value)}
                       style={{ background:'#0d0f14', color: u.role==='admin'?C.gold:C.muted, border:`1px solid ${C.border}`, borderRadius:6, padding:'6px 12px', fontSize:12, fontFamily:'inherit', cursor:'pointer' }}>
-                      <option value="viewer">Viewer</option>
-                      <option value="admin">Admin</option>
+                      <option value="viewer">Viewer — sees dashboard only</option>
+                      <option value="syncer">Syncer — loads calendar from email</option>
+                      <option value="admin">Admin — full access</option>
                     </select>
                   ) : (
                     <span style={{ fontSize:12, color:C.gold, background:C.goldFaint, border:`1px solid rgba(232,201,106,0.2)`, borderRadius:6, padding:'6px 12px' }}>You · admin</span>
