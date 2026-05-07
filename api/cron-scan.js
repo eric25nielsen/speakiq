@@ -12,8 +12,6 @@ const supabase = createClient(
 
 const SENDER          = 'jenniferspeakersclubrep@gmail.com'
 const SUBJECT_KEYWORD = 'Accept your invitation to join shared calendar'
-const NOTIFY_EMAIL    = process.env.NOTIFY_EMAIL   // who gets the notification
-const RESEND_API_KEY  = process.env.RESEND_API_KEY
 const ICAL_BASE       = 'https://calendar.google.com/calendar/ical/'
 const ICAL_SUFFIX     = '/public/basic.ics'
 const ALL_GENRES      = ['Leadership','Business','Healthcare','Technology','Education','Finance','Entrepreneurship','Sales','Mental Health','Nonprofit','Government','Real Estate','HR & Talent','Marketing','Wellness','Legal']
@@ -38,23 +36,7 @@ const scoreOpp = (o) => {
   return s
 }
 
-// ── Send email via Resend ──────────────────────────────────────────────────
-const sendEmail = async ({ to, subject, html }) => {
-  if (!RESEND_API_KEY || !to) return
-  await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${RESEND_API_KEY}`
-    },
-    body: JSON.stringify({
-      from: 'SpeakIQ <notifications@speakiq.app>',
-      to: [to],
-      subject,
-      html
-    })
-  })
-}
+// Email notifications removed — status visible in Syncer dashboard
 
 // ── Email templates ────────────────────────────────────────────────────────
 const successEmail = ({ calendarName, count, highMatch, month, appUrl }) => ({
@@ -166,9 +148,7 @@ If not found, return {"found":false,"reason":"no matching email in last 45 days"
 
       // Send failure notification
       const tmpl = failureEmail({ month, reason, appUrl })
-      await sendEmail({ to: NOTIFY_EMAIL, ...tmpl })
-
-      return res.status(200).json({ success: false, reason, month })
+          return res.status(200).json({ success: false, reason, month })
     }
 
     console.log(`[SpeakIQ Cron] Found calendar: ${emailData.calendarName}`)
@@ -244,18 +224,14 @@ Use null for unknowns. Return [] if empty.`,
     // ── Step 5: Send success notification ────────────────────────────────
     const highMatch = rows.filter(r => r.icp_score >= 75).length
     const tmpl = successEmail({ calendarName, count: rows.length, highMatch, month, appUrl })
-    await sendEmail({ to: NOTIFY_EMAIL, ...tmpl })
-
-    console.log(`[SpeakIQ Cron] Done. Notification sent to ${NOTIFY_EMAIL}`)
+      console.log(`[SpeakIQ Cron] Done. Notification sent to ${NOTIFY_EMAIL}`)
     return res.status(200).json({ success: true, count: rows.length, highMatch, calendarName })
 
   } catch(e) {
     console.error(`[SpeakIQ Cron] Error: ${e.message}`)
 
     const tmpl = failureEmail({ month, reason: e.message, appUrl })
-    await sendEmail({ to: NOTIFY_EMAIL, ...tmpl })
-
-    await supabase.from('pending_syncs').insert({
+      await supabase.from('pending_syncs').insert({
       month_label: monthKey, status: 'no_email',
       email_from: SENDER, email_date: now.toISOString(),
       calendar_name: null, ical_url: null,
