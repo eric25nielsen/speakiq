@@ -42,13 +42,13 @@ const timeAgo = (d) => {
 }
 
 export default function SyncTab({ session, icpGenres = [] }) {
-  const [status,    setStatus]   = useState('idle')  // idle | scanning | saving | success | error
-  const [icalUrl,   setIcalUrl]  = useState('')
-  const [monthLabel,setMonth]    = useState('')
-  const [result,    setResult]   = useState(null)    // { count, highMatch, calendarName, month }
-  const [errorMsg,  setError]    = useState('')
-  const [history,   setHistory]  = useState([])
-  const [step,      setStep]     = useState('')      // current progress description
+  const [status,     setStatus]  = useState('idle')
+  const [icalUrl,    setIcalUrl] = useState('')
+  const [monthLabel, setMonth]   = useState('')
+  const [result,     setResult]  = useState(null)
+  const [errorMsg,   setError]   = useState('')
+  const [step,       setStep]    = useState('')
+  const [history,    setHistory] = useState([])
 
   useEffect(() => {
     const now = new Date()
@@ -62,30 +62,32 @@ export default function SyncTab({ session, icpGenres = [] }) {
     setHistory(data || [])
   }
 
-  // ── Core: scan email, fetch iCal, save to DB — all in one go ──────────────
-  const runSync = async (rawUrl, month) => {
+  const runSync = async () => {
+    if (!icalUrl.trim() || !monthLabel.trim()) return
     setStatus('scanning')
     setStep('Fetching calendar events…')
     setResult(null)
     setError('')
 
     try {
-      const icalUrl = extractIcalUrl(rawUrl)
-      if (!icalUrl) throw new Error('Could not parse that calendar URL.')
+      const url = extractIcalUrl(icalUrl.trim())
+      if (!url) throw new Error('Could not parse that URL — make sure it starts with webcal:// or https://')
 
-      // Fetch + parse via server
       const res = await fetch('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: icalUrl, icpGenres, calendarMonth: month })
+        body: JSON.stringify({ url, icpGenres, calendarMonth: monthLabel.trim() })
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Scan failed')
 
       const opps = data.opportunities || []
-      if (opps.length === 0) throw new Error('Calendar was found but contained no events.')
+      if (opps.length === 0) throw new Error('Calendar was fetched but contained no events. Check the URL is correct.')
 
-      // Score
+      setStatus('saving')
+      setStep('Saving to database…')
+
+      const month = monthLabel.trim()
       const rows = opps.map(o => ({
         title:         o.title        || null,
         date:          o.date         || null,
@@ -103,10 +105,6 @@ export default function SyncTab({ session, icpGenres = [] }) {
         calendar_month: month,
       }))
 
-      // Save to DB — auto, no confirm needed
-      setStatus('saving')
-      setStep('Saving to database…')
-
       await supabase.from('opportunities').delete().eq('calendar_month', month)
       const { error: insertError } = await supabase.from('opportunities').insert(rows)
       if (insertError) throw new Error(`Database error: ${insertError.message}`)
@@ -118,19 +116,19 @@ export default function SyncTab({ session, icpGenres = [] }) {
         email_from:    'Admin',
         email_date:    new Date().toISOString(),
         calendar_name: month,
-        ical_url:      rawUrl,
+        ical_url:      icalUrl.trim(),
         imported_at:   new Date().toISOString(),
         imported_by:   session.user.id,
         event_count:   rows.length,
         created_at:    new Date().toISOString()
       }, { onConflict: 'month_label' })
 
-      const highMatch = rows.filter(r => r.icp_score >= 75).length
-      const hasContact = rows.filter(r => r.contact_email).length
+      const highMatch   = rows.filter(r => r.icp_score >= 75).length
+      const hasContact  = rows.filter(r => r.contact_email).length
       const hasLocation = rows.filter(r => r.location).length
-      const genres = [...new Set(rows.map(r => r.genre).filter(Boolean))]
+      const genres      = [...new Set(rows.map(r => r.genre).filter(Boolean))]
 
-      setResult({ count: rows.length, highMatch, hasContact, hasLocation, genres, month })
+      setResult({ count:rows.length, highMatch, hasContact, hasLocation, genres, month })
       setStatus('success')
       setStep('')
       loadHistory()
@@ -142,59 +140,15 @@ export default function SyncTab({ session, icpGenres = [] }) {
     }
   }
 
-  // ── Scan email first, then sync ────────────────────────────────────────────
-  const scanEmail = async (searchAll = false) => {
-    setStatus('scanning')
-    setStep(searchAll ? 'Deep-searching all emails…' : 'Searching inbox for Jennifer\'s calendar…')
-    setResult(null); setError('')
-
-    try {
-      const res = await fetch('/api/scan-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ senderEmails: [], searchAll })
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-
-      const emails = data.emails || []
-      if (emails.length === 0) throw new Error('No calendar invite emails found in inbox. Try Deep Search or paste the URL manually.')
-
-      const best    = emails[0]
-      const rawUrl  = best.icalUrl || best.embedUrl
-      if (!rawUrl)  throw new Error('Email found but no calendar link inside it. Paste the URL manually.')
-
-      const month = best.calendarName || monthLabel
-      setMonth(month)
-      setIcalUrl(rawUrl)
-      setStep(`Found "${best.calendarName || best.subject}" — fetching events…`)
-
-      await runSync(rawUrl, month)
-
-    } catch(e) {
-      setError(e.message)
-      setStatus('error')
-      setStep('')
-    }
-  }
-
-  const handlePasteSync = () => {
-    if (!icalUrl.trim() || !monthLabel.trim()) return
-    runSync(icalUrl.trim(), monthLabel.trim())
-  }
-
   const reset = () => { setStatus('idle'); setError(''); setResult(null); setStep('') }
 
-  const inp = { width:'100%', background:'#0d0f14', border:`1px solid ${C.border}`, borderRadius:6, padding:'10px 14px', color:C.text, fontSize:13, fontFamily:'inherit', outline:'none', boxSizing:'border-box' }
-  const btn = (disabled) => ({
-    background: disabled ? '#1e2130' : `linear-gradient(135deg,#c9a84c,${C.gold})`,
-    color: disabled ? C.dimmer : C.bg,
-    border:'none', borderRadius:8, padding:'10px 20px', fontSize:13,
-    fontWeight:'bold', cursor:disabled?'not-allowed':'pointer',
-    letterSpacing:'0.04em', fontFamily:'inherit'
-  })
-
   const busy = status === 'scanning' || status === 'saving'
+
+  const inp = {
+    width:'100%', background:'#0d0f14', border:`1px solid ${C.border}`,
+    borderRadius:6, padding:'10px 14px', color:C.text, fontSize:13,
+    fontFamily:'inherit', outline:'none', boxSizing:'border-box',
+  }
 
   const statusBadge = (s) => ({
     imported: { color:C.green,  bg:'rgba(0,200,150,0.1)',  label:'✓ Imported' },
@@ -207,30 +161,30 @@ export default function SyncTab({ session, icpGenres = [] }) {
     <div>
       <h2 style={{ color:C.gold, fontWeight:'normal', fontSize:21, marginBottom:4 }}>Sync Speaking Calendar</h2>
       <p style={{ color:C.dim, fontSize:14, lineHeight:1.7, marginBottom:24 }}>
-        Load this month's calendar. Events save to the database automatically and appear on the dashboard immediately.
+        Paste the calendar URL from Jennifer's email. Events save automatically and appear on the dashboard immediately for all users.
       </p>
 
-      {/* ── BUSY STATE ── */}
+      {/* ── BUSY ── */}
       {busy && (
-        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:12, padding:'32px', textAlign:'center', marginBottom:24 }}>
+        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:12, padding:'40px', textAlign:'center', marginBottom:24 }}>
           <div style={{ fontSize:36, marginBottom:12, display:'inline-block', animation:'spin 1.2s linear infinite' }}>⟳</div>
-          <div style={{ color:C.text, fontSize:15, marginBottom:6 }}>{status === 'saving' ? 'Saving to database…' : 'Loading calendar…'}</div>
+          <div style={{ color:C.text, fontSize:15, marginBottom:6 }}>
+            {status === 'saving' ? 'Saving to database…' : 'Fetching calendar…'}
+          </div>
           <div style={{ color:C.dim, fontSize:13 }}>{step}</div>
         </div>
       )}
 
-      {/* ── SUCCESS STATE ── */}
+      {/* ── SUCCESS ── */}
       {status === 'success' && result && (
         <div style={{ background:C.greenFaint, border:`1px solid rgba(0,200,150,0.3)`, borderRadius:12, padding:'24px', marginBottom:24 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:16 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:20 }}>
             <span style={{ fontSize:28 }}>✅</span>
             <div>
               <div style={{ color:C.green, fontSize:16, fontWeight:'bold' }}>Calendar loaded successfully</div>
               <div style={{ color:C.dim, fontSize:13, marginTop:2 }}>{result.month} · Live on the dashboard now</div>
             </div>
           </div>
-
-          {/* Stats grid */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(120px,1fr))', gap:10, marginBottom:16 }}>
             {[
               { label:'Total Events',   value:result.count,       gold:false },
@@ -238,14 +192,12 @@ export default function SyncTab({ session, icpGenres = [] }) {
               { label:'Has Contact',    value:result.hasContact,  gold:false },
               { label:'Has Location',   value:result.hasLocation, gold:false },
             ].map(s => (
-              <div key={s.label} style={{ background:'rgba(0,0,0,0.3)', borderRadius:8, padding:'12px 14px', textAlign:'center' }}>
-                <div style={{ fontSize:22, fontWeight:'bold', color:s.gold?C.gold:C.text }}>{s.value}</div>
-                <div style={{ fontSize:10, color:C.dim, textTransform:'uppercase', letterSpacing:'0.07em', marginTop:2 }}>{s.label}</div>
+              <div key={s.label} style={{ background:'rgba(0,0,0,0.25)', borderRadius:8, padding:'12px 14px', textAlign:'center' }}>
+                <div style={{ fontSize:24, fontWeight:'bold', color:s.gold?C.gold:C.text }}>{s.value}</div>
+                <div style={{ fontSize:10, color:C.dim, textTransform:'uppercase', letterSpacing:'0.07em', marginTop:3 }}>{s.label}</div>
               </div>
             ))}
           </div>
-
-          {/* Genres found */}
           {result.genres.length > 0 && (
             <div style={{ marginBottom:16 }}>
               <div style={{ fontSize:11, color:C.dim, textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>Genres Found</div>
@@ -256,57 +208,70 @@ export default function SyncTab({ session, icpGenres = [] }) {
               </div>
             </div>
           )}
-
           <button onClick={reset} style={{ background:'none', border:`1px solid rgba(0,200,150,0.3)`, color:C.green, borderRadius:6, padding:'7px 16px', cursor:'pointer', fontSize:12, fontFamily:'inherit' }}>
             Load Another Month
           </button>
         </div>
       )}
 
-      {/* ── ERROR STATE ── */}
+      {/* ── ERROR ── */}
       {status === 'error' && (
         <div style={{ background:'rgba(224,85,85,0.08)', border:`1px solid rgba(224,85,85,0.3)`, borderRadius:12, padding:'20px 24px', marginBottom:24 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
             <span style={{ fontSize:22 }}>⚠️</span>
             <div style={{ color:C.red, fontSize:15, fontWeight:'bold' }}>Sync failed</div>
           </div>
           <div style={{ color:C.muted, fontSize:13, lineHeight:1.7, marginBottom:14 }}>{errorMsg}</div>
-          <button onClick={reset} style={btn(false)}>Try Again</button>
+          <button onClick={reset} style={{ background:`linear-gradient(135deg,#c9a84c,${C.gold})`, color:C.bg, border:'none', borderRadius:8, padding:'9px 20px', fontSize:13, fontWeight:'bold', cursor:'pointer', fontFamily:'inherit' }}>
+            Try Again
+          </button>
         </div>
       )}
 
-      {/* ── IDLE: action buttons + URL input ── */}
+      {/* ── IDLE: URL input ── */}
       {!busy && status !== 'success' && (
-        <div>
-          {/* Buttons */}
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10, marginBottom:20 }}>
-            {[
-              { icon:'✉️', label:'Scan Email',  sub:'Find Jennifer\'s latest invite', onClick:()=>scanEmail(false), gold:true },
-              { icon:'🔍', label:'Deep Search', sub:'Search all past emails',          onClick:()=>scanEmail(true)  },
-              { icon:'🔗', label:'Paste URL',   sub:'Enter calendar link below',       onClick:()=>document.getElementById('ical-url-input')?.focus() },
-            ].map(b => (
-              <button key={b.label} onClick={b.onClick}
-                style={{ background:b.gold?`linear-gradient(135deg,#c9a84c,${C.gold})`:C.surface, color:b.gold?C.bg:C.text, border:b.gold?'none':`1px solid ${C.border}`, borderRadius:10, padding:'14px 10px', cursor:'pointer', fontFamily:'inherit', textAlign:'center', transition:'all 0.15s' }}>
-                <div style={{ fontSize:20, marginBottom:5 }}>{b.icon}</div>
-                <div style={{ fontSize:13, fontWeight:'bold', marginBottom:2 }}>{b.label}</div>
-                <div style={{ fontSize:11, color:b.gold?'rgba(0,0,0,0.6)':C.dim }}>{b.sub}</div>
-              </button>
-            ))}
-          </div>
+        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:12, padding:'24px', marginBottom:24 }}>
 
-          {/* URL + month inputs */}
-          <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:8 }}>
+          <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
             <div>
-              <label style={{ fontSize:11, color:C.muted, display:'block', marginBottom:5, textTransform:'uppercase', letterSpacing:'0.07em' }}>Calendar URL (optional — or use Scan Email above)</label>
-              <input id="ical-url-input" style={inp} value={icalUrl} onChange={e=>setIcalUrl(e.target.value)} placeholder="webcal:// or https://calendar.google.com/…" />
+              <label style={{ fontSize:11, color:C.muted, display:'block', marginBottom:6, textTransform:'uppercase', letterSpacing:'0.07em' }}>
+                Calendar URL from Jennifer's email
+              </label>
+              <textarea
+                value={icalUrl}
+                onChange={e => setIcalUrl(e.target.value)}
+                rows={3}
+                placeholder="Paste any Google Calendar link here — webcal://, embed URL, or iCal URL all work"
+                style={{ ...inp, fontFamily:'monospace', resize:'vertical', lineHeight:1.6, border:`1px solid ${icalUrl ? C.gold : C.border}` }}
+              />
+              <div style={{ fontSize:11, color:C.dimmer, marginTop:6, lineHeight:1.6 }}>
+                In Jennifer's email, look for a button or link that says "Open in Google Calendar" or copy any link starting with <em>calendar.google.com</em>
+              </div>
             </div>
+
             <div style={{ display:'flex', gap:10, alignItems:'flex-end' }}>
               <div style={{ flex:1 }}>
-                <label style={{ fontSize:11, color:C.muted, display:'block', marginBottom:5, textTransform:'uppercase', letterSpacing:'0.07em' }}>Month Label</label>
-                <input style={{ ...inp }} value={monthLabel} onChange={e=>setMonth(e.target.value)} placeholder="e.g. May2026" />
+                <label style={{ fontSize:11, color:C.muted, display:'block', marginBottom:6, textTransform:'uppercase', letterSpacing:'0.07em' }}>
+                  Month Label
+                </label>
+                <input
+                  value={monthLabel}
+                  onChange={e => setMonth(e.target.value)}
+                  placeholder="e.g. May2026"
+                  style={inp}
+                />
               </div>
-              <button style={btn(!icalUrl.trim() || !monthLabel.trim())} disabled={!icalUrl.trim() || !monthLabel.trim()} onClick={handlePasteSync}>
-                Sync Now
+              <button
+                onClick={runSync}
+                disabled={!icalUrl.trim() || !monthLabel.trim()}
+                style={{
+                  background: (icalUrl.trim() && monthLabel.trim()) ? `linear-gradient(135deg,#c9a84c,${C.gold})` : '#1e2130',
+                  color: (icalUrl.trim() && monthLabel.trim()) ? C.bg : C.dimmer,
+                  border:'none', borderRadius:8, padding:'10px 24px', fontSize:14,
+                  fontWeight:'bold', cursor:(icalUrl.trim()&&monthLabel.trim())?'pointer':'not-allowed',
+                  letterSpacing:'0.04em', fontFamily:'inherit', whiteSpace:'nowrap'
+                }}>
+                Sync Now →
               </button>
             </div>
           </div>
@@ -315,7 +280,7 @@ export default function SyncTab({ session, icpGenres = [] }) {
 
       {/* ── SYNC HISTORY ── */}
       {history.length > 0 && (
-        <div style={{ marginTop:28 }}>
+        <div>
           <div style={{ fontSize:12, color:C.dim, textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:10 }}>Sync History</div>
           <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
             {history.map(s => {
@@ -326,7 +291,6 @@ export default function SyncTab({ session, icpGenres = [] }) {
                   <div style={{ flex:1 }}>
                     <span style={{ fontSize:13, color:C.text }}>{s.calendar_name || s.month_label}</span>
                     {s.event_count != null && <span style={{ fontSize:12, color:C.dim, marginLeft:10 }}>{s.event_count} events</span>}
-                    {s.email_from && s.email_from !== 'Admin' && <span style={{ fontSize:11, color:C.dimmer, marginLeft:10 }}>via {s.email_from}</span>}
                   </div>
                   <span style={{ fontSize:11, color:C.dimmer, whiteSpace:'nowrap' }}>{timeAgo(s.imported_at || s.created_at)}</span>
                 </div>
