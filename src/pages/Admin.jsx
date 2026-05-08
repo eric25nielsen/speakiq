@@ -70,6 +70,23 @@ export default function Admin({ session, profile }) {
   const [inviting,    setInviting]    = useState(false)
   const [inviteMsg,   setInviteMsg]   = useState('')
 
+  // ── Settings ──────────────────────────────────────────────────────────────
+  const [senderEmail,    setSenderEmail]    = useState('jenniferspeakersclubrep@gmail.com')
+  const [senderEmailInput, setSenderInput] = useState('')
+  const [settingsSaved,  setSettingsSaved] = useState(false)
+
+  useEffect(() => {
+    supabase.from('app_settings').select('value').eq('key','sender_email').single()
+      .then(({ data }) => { if (data?.value) { setSenderEmail(data.value); setSenderInput(data.value) } })
+  }, [])
+
+  const saveSenderEmail = async () => {
+    await supabase.from('app_settings').upsert({ key:'sender_email', value:senderEmailInput.trim(), updated_at:new Date().toISOString() })
+    setSenderEmail(senderEmailInput.trim())
+    setSettingsSaved(true)
+    setTimeout(() => setSettingsSaved(false), 3000)
+  }
+
   // ── Interactions ───────────────────────────────────────────────────────────
   const [interactionData, setInteractionData] = useState([])
 
@@ -229,6 +246,23 @@ export default function Admin({ session, profile }) {
     fetchUsers()
   }
 
+  // ── Settings ──────────────────────────────────────────────────────────────
+  const [senderEmail,    setSenderEmail]    = useState('jenniferspeakersclubrep@gmail.com')
+  const [senderEmailInput, setSenderInput] = useState('')
+  const [settingsSaved,  setSettingsSaved] = useState(false)
+
+  useEffect(() => {
+    supabase.from('app_settings').select('value').eq('key','sender_email').single()
+      .then(({ data }) => { if (data?.value) { setSenderEmail(data.value); setSenderInput(data.value) } })
+  }, [])
+
+  const saveSenderEmail = async () => {
+    await supabase.from('app_settings').upsert({ key:'sender_email', value:senderEmailInput.trim(), updated_at:new Date().toISOString() })
+    setSenderEmail(senderEmailInput.trim())
+    setSettingsSaved(true)
+    setTimeout(() => setSettingsSaved(false), 3000)
+  }
+
   // ── Interactions ─────────────────────────────────────────────────────────
   useEffect(()=>{ if(tab==='interactions') fetchInteractions() },[tab])
   const fetchInteractions = async () => {
@@ -266,7 +300,7 @@ export default function Admin({ session, profile }) {
       <Nav profile={profile} />
 
       <nav style={{ background:C.surface, borderBottom:`1px solid ${C.border}`, padding:'0 28px', display:'flex', gap:2 }}>
-        {[['sync','Sync Calendar'],['users','Manage Users'],['interactions','Team Activity'],['icp','ICP Setup']].map(([id,label])=>(
+        {[['sync','Sync Calendar'],['users','Manage Users'],['interactions','Team Activity'],['icp','ICP Setup'],['settings','Settings']].map(([id,label])=>(
           <button key={id} onClick={()=>setTab(id)} style={{ background:'none', border:'none', borderBottom:tab===id?`2px solid ${C.gold}`:'2px solid transparent', color:tab===id?C.gold:C.dim, padding:'11px 16px', cursor:'pointer', fontSize:13, letterSpacing:'0.05em', fontFamily:'inherit' }}>
             {label}
           </button>
@@ -358,6 +392,52 @@ export default function Admin({ session, profile }) {
                 </div>
               ))
             }
+          </div>
+        )}
+
+        {/* ── SETTINGS ── */}
+        {tab === 'settings' && (
+          <div>
+            <h2 style={{ color:C.gold, fontWeight:'normal', fontSize:21, marginBottom:6 }}>Settings</h2>
+            <p style={{ color:C.dim, fontSize:14, lineHeight:1.7, marginBottom:24 }}>
+              Configure which email address SpeakIQ looks for when scanning for calendar invites.
+            </p>
+
+            <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:'22px 24px', marginBottom:16 }}>
+              <div style={{ fontSize:14, color:C.text, fontWeight:'bold', marginBottom:4 }}>Sender Email Address</div>
+              <p style={{ fontSize:13, color:C.dim, lineHeight:1.6, marginBottom:16 }}>
+                The email address that sends Jennifer's monthly speaking calendar invites. The monthly auto-scan looks for emails from this address.
+              </p>
+              <div style={{ display:'flex', gap:10, alignItems:'flex-end' }}>
+                <div style={{ flex:1 }}>
+                  <input
+                    type="email"
+                    value={senderEmailInput}
+                    onChange={e => setSenderInput(e.target.value)}
+                    placeholder="e.g. jenniferspeakersclubrep@gmail.com"
+                    style={inp}
+                  />
+                </div>
+                <button
+                  onClick={saveSenderEmail}
+                  disabled={!senderEmailInput.trim() || senderEmailInput.trim() === senderEmail}
+                  style={btn(!senderEmailInput.trim() || senderEmailInput.trim() === senderEmail)}>
+                  {settingsSaved ? '✓ Saved' : 'Save'}
+                </button>
+              </div>
+              {senderEmail && (
+                <div style={{ marginTop:10, fontSize:12, color:C.dim }}>
+                  Currently scanning: <span style={{ color:C.green }}>{senderEmail}</span>
+                </div>
+              )}
+            </div>
+
+            <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:'18px 24px' }}>
+              <div style={{ fontSize:13, color:C.text, fontWeight:'bold', marginBottom:8 }}>Auto-Sync Schedule</div>
+              <div style={{ fontSize:13, color:C.dim, lineHeight:1.7 }}>
+                SpeakIQ automatically scans for new calendars on the <strong style={{ color:C.muted }}>1st of every month at 9:00 AM</strong>. If a new calendar is found it imports automatically. If not, it logs the failure in Sync History.
+              </div>
+            </div>
           </div>
         )}
 
