@@ -219,7 +219,13 @@ export default function Admin({ session, profile }) {
   }
   const removeUser = async (userId, email) => {
     if (!window.confirm(`Remove ${email}? They will no longer be able to log in.`)) return
-    await supabase.from('profiles').delete().eq('id', userId)
+    const res = await fetch('/api/remove-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId })
+    })
+    const data = await res.json()
+    if (!res.ok) { alert(`Failed to remove user: ${data.error}`); return }
     fetchUsers()
   }
 
