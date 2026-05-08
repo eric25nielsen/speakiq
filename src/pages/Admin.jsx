@@ -217,6 +217,11 @@ export default function Admin({ session, profile }) {
     await supabase.from('profiles').update({ role: newRole }).eq('id', userId)
     fetchUsers()
   }
+  const removeUser = async (userId, email) => {
+    if (!window.confirm(`Remove ${email}? They will no longer be able to log in.`)) return
+    await supabase.from('profiles').delete().eq('id', userId)
+    fetchUsers()
+  }
 
   // ── Interactions ─────────────────────────────────────────────────────────
   useEffect(()=>{ if(tab==='interactions') fetchInteractions() },[tab])
@@ -305,12 +310,19 @@ export default function Admin({ session, profile }) {
                     <div style={{ fontSize:11, color:C.dim, marginTop:2 }}>Joined {u.created_at?.slice(0,10)}</div>
                   </div>
                   {u.id !== session.user.id ? (
-                    <select value={u.role||'viewer'} onChange={e=>updateRole(u.id,e.target.value)}
-                      style={{ background:'#0d0f14', color:u.role==='admin'?C.gold:u.role==='syncer'?C.green:C.muted, border:`1px solid ${C.border}`, borderRadius:6, padding:'6px 12px', fontSize:12, fontFamily:'inherit', cursor:'pointer' }}>
-                      <option value="viewer">Viewer</option>
-                      <option value="syncer">Syncer</option>
-                      <option value="admin">Admin</option>
-                    </select>
+                    <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                      <select value={u.role||'viewer'} onChange={e=>updateRole(u.id,e.target.value)}
+                        style={{ background:'#0d0f14', color:u.role==='admin'?C.gold:u.role==='syncer'?C.green:C.muted, border:`1px solid ${C.border}`, borderRadius:6, padding:'6px 12px', fontSize:12, fontFamily:'inherit', cursor:'pointer' }}>
+                        <option value="viewer">Viewer</option>
+                        <option value="syncer">Syncer</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                      <button onClick={()=>removeUser(u.id, u.email)}
+                        style={{ background:'none', border:`1px solid rgba(224,85,85,0.3)`, color:'#e05555', borderRadius:6, padding:'6px 12px', cursor:'pointer', fontSize:12, fontFamily:'inherit' }}
+                        title="Remove user">
+                        Remove
+                      </button>
+                    </div>
                   ) : (
                     <span style={{ fontSize:12, color:C.gold, background:C.goldFaint, border:`1px solid rgba(232,201,106,0.2)`, borderRadius:6, padding:'5px 12px' }}>You · admin</span>
                   )}
