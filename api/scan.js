@@ -57,15 +57,33 @@ module.exports = async function handler(req, res) {
     const desc    = event.description?.val || event.description || ''
     const location= event.location?.val || event.location || ''
 
-    // Try to extract real event date from description first
+    // Extract real event date from description text (not DTSTART which is just listing date)
+    // Strip HTML tags first for cleaner parsing
+    const plainDesc = desc.replace(/<[^>]+>/g, ' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&#39;/g,"'").replace(/&nbsp;/g,' ').replace(/\s+/g,' ')
+
     const datePatterns = [
-      /(?:event\s+date|conference\s+date|date)[:\s]+([^\n\r]+)/i,
-      /(\w+ \d{1,2}[-–]\d{1,2},?\s*\d{4})/,
-      /(\w+ \d{1,2},?\s*\d{4})/,
+      // Labeled date fields
+      /(?:event\s+date|conference\s+date|date\s+of\s+event)[:\s]+([^\n\r<]{5,40})/i,
+      // Month Day-Day, Year  e.g. "June 25-26, 2026"
+      /\b((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}(?:[-–]\d{1,2})?,?\s*\d{4})\b/i,
+      // Month Day, Year  e.g. "November 5-7, 2026"  
+      /\b((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:[-–]\d{1,2})?,?\s*\d{4})\b/i,
+      // MM/DD/YYYY
       /(\d{1,2}\/\d{1,2}\/\d{4})/,
+      // Year alone as fallback
+      /\b(202[5-9]|203\d)\b/,
     ]
-    const realDate = extractField(desc, datePatterns) ||
-      (event.start ? new Date(event.start).toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' }) : null)
+
+    let realDate = null
+    for (const pattern of datePatterns) {
+      const m = plainDesc.match(pattern)
+      if (m) { realDate = (m[1] || m[0]).trim(); break }
+    }
+    // Last resort: use DTSTART year if it looks future-ish
+    if (!realDate && event.start) {
+      const d = new Date(event.start)
+      if (d.getFullYear() >= 2025) realDate = d.toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' })
+    }
 
     // Extract contact info
     const emailMatch = desc.match(/[\w.+-]+@[\w-]+\.[a-z]{2,}/i)
@@ -75,19 +93,22 @@ module.exports = async function handler(req, res) {
       /(?:call|email|contact)\s+([A-Z][a-z]+ [A-Z][a-z]+)/,
     ]
 
+    // Extract fields from plain text version for better matching
+    const extractPlain = (patterns) => extractField(plainDesc, patterns)
+
     return {
       title:        summary,
       date:         realDate,
-      location:     location || extractField(desc, [/location[:\s]+([^\n\r]+)/i, /venue[:\s]+([^\n\r]+)/i]),
-      contactName:  extractField(desc, namePatterns),
+      location:     location || extractPlain([/location[:\s]+([^\n<]{3,60})/i, /venue[:\s]+([^\n<]{3,60})/i, /([A-Z][a-z]+,\s*[A-Z]{2}\s+\d{5})/]),
+      contactName:  extractPlain([/(?:planner|contact|coordinator)[:\s]+([A-Z][a-z]+ [A-Z][a-z]+)/i, /speaker\s+contact[:\s]+([A-Z][a-z]+ [A-Z][a-z]+)/i]),
       contactEmail: emailMatch?.[0] || null,
       contactPhone: phoneMatch?.[0] || null,
-      audience:     extractField(desc, [/audience[:\s]+([^\n\r]+)/i, /attendees[:\s]+([^\n\r]+)/i]),
-      fee:          extractField(desc, [/(?:fee|honorarium|stipend|compensation)[:\s]+([^\n\r]+)/i]),
-      format:       extractField(desc, [/format[:\s]+([^\n\r]+)/i, /(?:keynote|panel|workshop|webinar|breakout|session)/i]),
-      organization: extractField(desc, [/organization[:\s]+([^\n\r]+)/i, /(?:hosted?\s+by|host)[:\s]+([^\n\r]+)/i]),
-      details:      desc,
-      rawText:      `${summary}\n${desc}`.slice(0, 500), // for genre classification
+      audience:     extractPlain([/audience[:\s]+([^\n<]{3,80})/i, /attendees[:\s]+([^\n<]{3,80})/i]),
+      fee:          extractPlain([/(?:fee|honorarium|stipend|compensation)[:\s]+([^\n<]{3,60})/i]),
+      format:       extractPlain([/format[:\s]+([^\n<]{3,60})/i, /(keynote|panel|workshop|webinar|breakout|general session)/i]),
+      organization: extractPlain([/company[:\s]+([^\n<]{3,80})/i, /organization[:\s]+([^\n<]{3,80})/i, /hosted?\s+by[:\s]+([^\n<]{3,80})/i]),
+      details:      plainDesc,
+      rawText:      `${summary}\n${plainDesc}`.slice(0, 600),
     }
   })
 
