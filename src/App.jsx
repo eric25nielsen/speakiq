@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard.jsx'
 import Admin from './pages/Admin.jsx'
 import Syncer from './pages/Syncer.jsx'
 import SetPassword from './pages/SetPassword.jsx'
+import PublicDashboard from './pages/PublicDashboard.jsx'
 
 export default function App() {
   const [session,       setSession]       = useState(undefined)
@@ -37,6 +38,9 @@ export default function App() {
       Loading…
     </div>
   )
+
+  // Public dashboard — no login required
+  if (window.location.pathname === '/public') return <PublicDashboard />
 
   // Password set screen (invite / reset links)
   if (needsPassword && session) {
