@@ -146,23 +146,28 @@ module.exports = async function handler(req, res) {
     }
   })
 
-  // ── 5. Batch genre classification ─────────────────────────────────────────
+  // ── 5. Batch genre classification in chunks of 50 ────────────────────────
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
   const genres = icpGenres.length > 0 ? icpGenres : ['Leadership','Business','Healthcare','Technology','Education','Finance','Entrepreneurship','Sales','Mental Health','Nonprofit','Government','Real Estate','Marketing','Wellness']
 
   let genreMap = {}
+  const CHUNK = 50
   try {
-    const summaries = extractedEvents.map((e, i) => `${i}: ${e.rawText}`).join('\n---\n')
-    const msg = await client.messages.create({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 2000,
-      system: `Classify each speaking event by genre. Pick the single best from: ${genres.join(', ')}.
-Return ONLY a raw JSON object mapping index to genre string, e.g. {"0":"Leadership","1":"Healthcare"}.`,
-      messages: [{ role:'user', content: `Classify these ${extractedEvents.length} events:\n\n${summaries.slice(0,14000)}` }]
-    })
-    const text = msg.content.filter(b=>b.type==='text').map(b=>b.text).join('')
-    const m = text.match(/\{[\s\S]*\}/)
-    if (m) genreMap = JSON.parse(m[0])
+    for (let start = 0; start < extractedEvents.length; start += CHUNK) {
+      const chunk = extractedEvents.slice(start, start + CHUNK)
+      const summaries = chunk.map((e, i) => `${start+i}: ${e.title} | ${e.organization || ''} | ${e.rawText.slice(0,200)}`).join('\n')
+      const msg = await client.messages.create({
+        model: 'claude-sonnet-4-5',
+        max_tokens: 1000,
+        system: `Classify each speaking event by genre. Pick ONE from: ${genres.join(', ')}.
+Return ONLY a raw JSON object mapping the number index to genre string. Example: {"0":"Leadership","1":"Healthcare"}.
+Every index must have a value. Never return null.`,
+        messages: [{ role:'user', content: `Classify these events by genre:\n\n${summaries}` }]
+      })
+      const text = msg.content.filter(b=>b.type==='text').map(b=>b.text).join('')
+      const m = text.match(/\{[\s\S]*\}/)
+      if (m) Object.assign(genreMap, JSON.parse(m[0]))
+    }
   } catch(e) {
     console.error('Genre classification failed:', e.message)
   }

@@ -12,6 +12,8 @@ const C = {
 
 const scoreColor = (s) => s >= 75 ? C.green : s >= 45 ? C.orange : C.red
 
+  const [, forceUpdate] = useState(0)
+
 const sel = {
   background:'#1a1d28', color:C.text, border:`1px solid #2a2d3a`,
   borderRadius:6, padding:'8px 12px', fontSize:13, fontFamily:'inherit', outline:'none',
@@ -28,6 +30,10 @@ export default function Dashboard({ session, profile }) {
   const [filterState, setState_]    = useState('')
   const [filterBM,    setFilterBM]  = useState(false)
   const [sortBy,      setSortBy]    = useState('score')
+  const [icpGenres,   setIcpGenres] = useState(['Leadership','Business','Healthcare'])
+  const [showICP,     setShowICP]   = useState(false)
+
+  const ALL_GENRES = ['Leadership','Healthcare','Business','Technology','Education','Finance','Entrepreneurship','Sales','Mental Health','Nonprofit','Government','Real Estate','HR & Talent','Marketing','Wellness','Legal']
 
   const fetchOpps = useCallback(async () => {
     setLoading(true)
@@ -37,6 +43,28 @@ export default function Dashboard({ session, profile }) {
   }, [])
 
   useEffect(() => { fetchOpps() }, [fetchOpps])
+
+  // Load saved ICP genres
+  useEffect(() => {
+    supabase.from('app_settings').select('value').eq('key','icp_genres').single()
+      .then(({ data }) => { if (data?.value) { try { setIcpGenres(JSON.parse(data.value)) } catch {} } })
+  }, [])
+
+  // Dynamic ICP score calculation
+  const calcScore = useCallback((opp) => {
+    let s = 0
+    const g = (opp.genre || '').toLowerCase()
+    if (icpGenres.some(ig => g.includes(ig.toLowerCase()) || ig.toLowerCase().includes(g))) s += 70
+    if (opp.contact_email || opp.contact_phone) s += 15
+    if (opp.location) s += 10
+    if (opp.fee) s += 5
+    return s
+  }, [icpGenres])
+
+  const saveIcpGenres = async (genres) => {
+    setIcpGenres(genres)
+    await supabase.from('app_settings').upsert({ key:'icp_genres', value:JSON.stringify(genres), updated_at:new Date().toISOString() })
+  }
 
   useEffect(() => {
     try {
@@ -57,20 +85,23 @@ export default function Dashboard({ session, profile }) {
   const allGenres = useMemo(() => ['All', ...new Set(opps.map(o=>o.genre).filter(Boolean))], [opps])
   const allMonths = useMemo(() => ['All', ...new Set(opps.map(o=>o.calendar_month).filter(Boolean))], [opps])
 
+  // Apply dynamic ICP scoring based on current genres
+  const scoredOpps = useMemo(() => opps.map(o => ({ ...o, dynamicScore: calcScore(o) })), [opps, calcScore])
+
   const filtered = useMemo(() => {
-    let list = [...opps]
+    let list = [...scoredOpps]
     if (search)          list = list.filter(o => JSON.stringify(o).toLowerCase().includes(search.toLowerCase()))
     if (filterGenre !== 'All') list = list.filter(o => o.genre === filterGenre)
     if (filterMonth !== 'All') list = list.filter(o => o.calendar_month === filterMonth)
     if (filterState)     list = list.filter(o => (o.location||'').toLowerCase().includes(filterState.toLowerCase()))
     if (filterBM)        list = list.filter(o => bookmarks.has(o.id))
     list.sort((a,b) =>
-      sortBy === 'score' ? b.icp_score - a.icp_score :
+      sortBy === 'score' ? b.dynamicScore - a.dynamicScore :
       sortBy === 'date'  ? new Date(a.date||0) - new Date(b.date||0) :
       (a.title||'').localeCompare(b.title||'')
     )
     return list
-  }, [opps, search, filterGenre, filterMonth, filterState, filterBM, sortBy, bookmarks])
+  }, [scoredOpps, search, filterGenre, filterMonth, filterState, filterBM, sortBy, bookmarks])
 
   const exportCSV = () => {
     const h = ['#','Title','Date','Location','Organization','Genre','Format','Contact','Email','Phone','Fee','ICP Score','Details','Month']
@@ -92,7 +123,7 @@ export default function Dashboard({ session, profile }) {
         <div style={{ background:C.surface, borderBottom:`1px solid ${C.border}`, padding:'10px 24px', display:'flex', gap:24, flexWrap:'wrap', alignItems:'center' }}>
           {[
             { l:'Total',          v:opps.length },
-            { l:'High Match 75%+',v:opps.filter(o=>o.icp_score>=75).length, gold:true },
+            { l:'High Match 75%+',v:scoredOpps.filter(o=>o.dynamicScore>=75).length, gold:true },
             { l:'Bookmarked',     v:bookmarks.size },
             { l:'Showing',        v:filtered.length },
           ].map(s => (
@@ -149,7 +180,30 @@ export default function Dashboard({ session, profile }) {
                 <option value="title">A–Z</option>
               </select>
               <button onClick={exportCSV} style={{ ...sel, cursor:'pointer' }}>↓ Export</button>
+              <button onClick={()=>setShowICP(p=>!p)}
+                style={{ ...sel, cursor:'pointer', background:showICP?C.goldFaint:'#1a1d28', color:showICP?C.gold:C.dim, border:`1px solid ${showICP?C.gold:'#2a2d3a'}` }}>
+                ⚙ ICP
+              </button>
             </div>
+
+            {/* ICP Genre Panel */}
+            {showICP && (
+              <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:'16px 18px', marginBottom:12 }}>
+                <div style={{ fontSize:13, color:C.text, fontWeight:'bold', marginBottom:4 }}>ICP Genre Priorities</div>
+                <p style={{ fontSize:12, color:C.dim, marginBottom:12, lineHeight:1.6 }}>Select the genres that match your ideal audience. The list re-ranks instantly.</p>
+                <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                  {ALL_GENRES.map(g => {
+                    const active = icpGenres.includes(g)
+                    return (
+                      <button key={g} onClick={()=>saveIcpGenres(active?icpGenres.filter(x=>x!==g):[...icpGenres,g])}
+                        style={{ background:active?C.goldFaint:'#0d0f14', color:active?C.gold:C.dim, border:`1px solid ${active?C.gold:'#2a2d3a'}`, borderRadius:20, padding:'5px 14px', cursor:'pointer', fontSize:12, fontFamily:'inherit' }}>
+                        {active?'✓ ':''}{g}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
 
             <div style={{ fontSize:12, color:C.dim, marginBottom:12 }}>
               Showing <strong style={{ color:C.text }}>{filtered.length}</strong> of {opps.length} opportunities
