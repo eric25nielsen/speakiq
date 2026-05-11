@@ -20,7 +20,6 @@ const extractIcalUrl = (raw) => {
   if (m) return `${ICAL_BASE}${encodeURIComponent(decodeURIComponent(m[1]))}${ICAL_SUFFIX}`
   if (raw.includes('@group.calendar.google.com') || raw.includes('@gmail.com'))
     return `${ICAL_BASE}${encodeURIComponent(raw)}${ICAL_SUFFIX}`
-  // Handle cid= format from Google Calendar invite links
   const cidMatch = raw.match(/[?&]cid=([^&]+)/)
   if (cidMatch) {
     try {
@@ -50,14 +49,13 @@ const timeAgo = (d) => {
 }
 
 export default function SyncTab({ session, icpGenres = [] }) {
-  const [phase,      setPhase]    = useState('idle')  // idle | scanning-email | found-emails | syncing | saving | success | error
-  const [icalUrl,    setIcalUrl]  = useState('')
-  const [monthLabel, setMonth]    = useState('')
-  const [result,     setResult]   = useState(null)
-  const [errorMsg,   setError]    = useState('')
-  const [step,       setStep]     = useState('')
-  const [history,    setHistory]  = useState([])
-  const [emailHits,  setEmailHits]= useState([])   // emails found in scan
+  const [phase,      setPhase]   = useState('idle')
+  const [icalUrl,    setIcalUrl] = useState('')
+  const [monthLabel, setMonth]   = useState('')
+  const [result,     setResult]  = useState(null)
+  const [errorMsg,   setError]   = useState('')
+  const [step,       setStep]    = useState('')
+  const [history,    setHistory] = useState([])
 
   useEffect(() => {
     const now = new Date()
@@ -71,77 +69,32 @@ export default function SyncTab({ session, icpGenres = [] }) {
     setHistory(data || [])
   }
 
-  // ── Step 1: Scan email for calendar links ──────────────────────────────────
-  const scanEmail = async () => {
-    setPhase('scanning-email')
-    setStep('Searching your inbox for calendar links…')
-    setEmailHits([])
-    setError('')
-
-    try {
-      const res = await fetch('/api/scan-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-
-      const emails = (data.emails || []).filter(e => e.icalUrl || e.embedUrl || e.calendarId)
-
-      if (emails.length === 0) {
-        throw new Error('No calendar links found in your inbox. Make sure the email from Jennifer (or forwarded from Judy) is in your Gmail inbox, then try again.')
-      }
-
-      setEmailHits(emails)
-      setPhase('found-emails')
-
-    } catch(e) {
-      setError(e.message)
-      setPhase('error')
-    }
-  }
-
-  // ── Step 2: User selects an email result → sync it ─────────────────────────
-  const syncFromEmail = async (email) => {
-    const rawUrl = email.icalUrl || email.embedUrl || email.calendarId
-    const month  = email.calendarName || monthLabel
-    setMonth(month)
-    setIcalUrl(rawUrl)
-    await runSync(rawUrl, month)
-  }
-
-  // ── Sync all found emails at once ──────────────────────────────────────────
-  const syncAll = async () => {
-    // Use the first/best hit
-    if (emailHits.length > 0) await syncFromEmail(emailHits[0])
-  }
-
-  // ── Core sync: fetch iCal → save to DB ────────────────────────────────────
-  const runSync = async (rawUrl, month) => {
+  const runSync = async () => {
+    if (!icalUrl.trim() || !monthLabel.trim()) return
     setPhase('syncing')
     setStep('Fetching calendar events…')
     setResult(null)
     setError('')
 
     try {
-      const url = extractIcalUrl(rawUrl)
-      if (!url) throw new Error('Could not parse the calendar URL. Try pasting it manually below.')
+      const url = extractIcalUrl(icalUrl.trim())
+      if (!url) throw new Error('Could not parse that URL — make sure it starts with webcal:// or https://')
 
       const res = await fetch('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, icpGenres, calendarMonth: month })
+        body: JSON.stringify({ url, icpGenres, calendarMonth: monthLabel.trim() })
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Scan failed')
 
       const opps = data.opportunities || []
-      if (opps.length === 0) throw new Error('Calendar was fetched but contained no events. The URL may be correct but the calendar is empty.')
+      if (opps.length === 0) throw new Error('Calendar fetched but no events found. Check the URL is correct.')
 
       setPhase('saving')
-      setStep(`Saving ${opps.length} opportunities to database…`)
+      setStep(`Saving ${opps.length} opportunities…`)
 
+      const month = monthLabel.trim()
       const rows = opps.map(o => ({
         title:         o.title        || null,
         date:          o.date         || null,
@@ -166,22 +119,24 @@ export default function SyncTab({ session, icpGenres = [] }) {
       await supabase.from('pending_syncs').upsert({
         month_label:   month,
         status:        'imported',
-        email_from:    'Admin scan',
+        email_from:    'Admin',
         email_date:    new Date().toISOString(),
         calendar_name: month,
-        ical_url:      rawUrl,
+        ical_url:      icalUrl.trim(),
         imported_at:   new Date().toISOString(),
         imported_by:   session.user.id,
         event_count:   rows.length,
         created_at:    new Date().toISOString()
       }, { onConflict: 'month_label' })
 
-      const highMatch   = rows.filter(r => r.icp_score >= 75).length
-      const hasContact  = rows.filter(r => r.contact_email).length
-      const hasLocation = rows.filter(r => r.location).length
-      const genres      = [...new Set(rows.map(r => r.genre).filter(Boolean))]
-
-      setResult({ count:rows.length, highMatch, hasContact, hasLocation, genres, month })
+      setResult({
+        count:       rows.length,
+        highMatch:   rows.filter(r => r.icp_score >= 75).length,
+        hasContact:  rows.filter(r => r.contact_email).length,
+        hasLocation: rows.filter(r => r.location).length,
+        genres:      [...new Set(rows.map(r => r.genre).filter(Boolean))],
+        month,
+      })
       setPhase('success')
       setStep('')
       loadHistory()
@@ -192,14 +147,9 @@ export default function SyncTab({ session, icpGenres = [] }) {
     }
   }
 
-  const handleManualSync = () => {
-    if (!icalUrl.trim() || !monthLabel.trim()) return
-    runSync(icalUrl.trim(), monthLabel.trim())
-  }
+  const reset = () => { setPhase('idle'); setError(''); setResult(null); setStep(''); setIcalUrl('') }
 
-  const reset = () => { setPhase('idle'); setError(''); setResult(null); setStep(''); setEmailHits([]) }
-
-  const busy = phase === 'scanning-email' || phase === 'syncing' || phase === 'saving'
+  const busy = phase === 'syncing' || phase === 'saving'
 
   const inp = {
     width:'100%', background:'#0d0f14', border:`1px solid ${C.border}`,
@@ -217,63 +167,23 @@ export default function SyncTab({ session, icpGenres = [] }) {
   return (
     <div>
       <h2 style={{ color:C.gold, fontWeight:'normal', fontSize:21, marginBottom:4 }}>Sync Speaking Calendar</h2>
-      <p style={{ color:C.dim, fontSize:14, lineHeight:1.7, marginBottom:24 }}>
-        Click <strong style={{ color:C.text }}>Scan Email</strong> to automatically find Jennifer's calendar links in your inbox and load them. Or paste a URL directly below.
+      <p style={{ color:C.dim, fontSize:14, lineHeight:1.7, marginBottom:6 }}>
+        Paste the calendar URL below and hit Sync. Events save automatically and go live on the dashboard for all users instantly.
       </p>
+
+      {/* How to get the URL tip */}
+      <div style={{ background:C.goldFaint, border:`1px solid rgba(232,201,106,0.2)`, borderRadius:8, padding:'12px 16px', marginBottom:24, fontSize:13, color:C.muted, lineHeight:1.7 }}>
+        <strong style={{ color:C.gold }}>How to get the URL each month:</strong> Ask Claude (claude.ai) — type <em>"find Jennifer's calendar email and give me the iCal URL"</em>. Claude will search your Gmail and return the URL in seconds. Then paste it here.
+      </div>
 
       {/* ── BUSY ── */}
       {busy && (
         <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:12, padding:'40px', textAlign:'center', marginBottom:24 }}>
           <div style={{ fontSize:36, marginBottom:12, display:'inline-block', animation:'spin 1.2s linear infinite' }}>⟳</div>
           <div style={{ color:C.text, fontSize:15, marginBottom:6 }}>
-            {phase === 'scanning-email' ? 'Scanning email…' : phase === 'saving' ? 'Saving to database…' : 'Fetching calendar…'}
+            {phase === 'saving' ? 'Saving to database…' : 'Fetching calendar…'}
           </div>
           <div style={{ color:C.dim, fontSize:13 }}>{step}</div>
-        </div>
-      )}
-
-      {/* ── FOUND EMAILS ── */}
-      {phase === 'found-emails' && emailHits.length > 0 && (
-        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:12, padding:'24px', marginBottom:24 }}>
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16, flexWrap:'wrap', gap:10 }}>
-            <div>
-              <div style={{ color:C.text, fontSize:15, fontWeight:'bold' }}>
-                Found {emailHits.length} calendar invite{emailHits.length !== 1 ? 's' : ''}
-              </div>
-              <div style={{ color:C.dim, fontSize:13, marginTop:2 }}>Select one to import, or import all</div>
-            </div>
-            {emailHits.length > 1 && (
-              <button onClick={syncAll}
-                style={{ background:`linear-gradient(135deg,#c9a84c,${C.gold})`, color:C.bg, border:'none', borderRadius:8, padding:'9px 20px', cursor:'pointer', fontSize:13, fontWeight:'bold', fontFamily:'inherit' }}>
-                Import All →
-              </button>
-            )}
-          </div>
-
-          <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-            {emailHits.map((email, i) => (
-              <div key={i} style={{ background:C.bg, border:`1px solid ${C.border}`, borderRadius:10, padding:'14px 16px', display:'flex', alignItems:'center', gap:14, flexWrap:'wrap' }}>
-                <div style={{ flex:1, minWidth:200 }}>
-                  <div style={{ fontSize:14, color:C.text, fontWeight:'bold', marginBottom:3 }}>
-                    {email.calendarName || email.subject || 'Calendar Invite'}
-                  </div>
-                  <div style={{ display:'flex', gap:12, fontSize:11, color:C.dim, flexWrap:'wrap' }}>
-                    <span>From: {email.from}</span>
-                    {email.date && <span>{new Date(email.date).toLocaleDateString()}</span>}
-                    <span style={{ color:C.green }}>✓ Calendar link found</span>
-                  </div>
-                </div>
-                <button onClick={() => syncFromEmail(email)}
-                  style={{ background:`linear-gradient(135deg,#c9a84c,${C.gold})`, color:C.bg, border:'none', borderRadius:8, padding:'8px 18px', cursor:'pointer', fontSize:12, fontWeight:'bold', fontFamily:'inherit', whiteSpace:'nowrap' }}>
-                  Import →
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <button onClick={reset} style={{ background:'none', border:'none', color:C.dim, cursor:'pointer', fontSize:12, fontFamily:'inherit', marginTop:12, textDecoration:'underline' }}>
-            Cancel
-          </button>
         </div>
       )}
 
@@ -330,50 +240,41 @@ export default function SyncTab({ session, icpGenres = [] }) {
         </div>
       )}
 
-      {/* ── IDLE: Scan button + manual URL ── */}
-      {!busy && phase !== 'success' && phase !== 'found-emails' && (
-        <div style={{ display:'flex', flexDirection:'column', gap:12, marginBottom:24 }}>
-
-          {/* Big scan button */}
-          <button onClick={scanEmail}
-            style={{ background:`linear-gradient(135deg,#c9a84c,${C.gold})`, color:C.bg, border:'none', borderRadius:12, padding:'20px', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:16, width:'100%', textAlign:'left' }}>
-            <span style={{ fontSize:32, flexShrink:0 }}>✉️</span>
+      {/* ── IDLE ── */}
+      {!busy && phase !== 'success' && (
+        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:12, padding:'24px', marginBottom:24 }}>
+          <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
             <div>
-              <div style={{ fontSize:16, fontWeight:'bold', marginBottom:3 }}>Scan Email for Calendar Links</div>
-              <div style={{ fontSize:13, opacity:0.75 }}>Searches your inbox for Jennifer's monthly speaking calendar — finds the link and loads it automatically</div>
+              <label style={{ fontSize:11, color:C.muted, display:'block', marginBottom:6, textTransform:'uppercase', letterSpacing:'0.07em' }}>
+                Calendar URL
+              </label>
+              <textarea
+                value={icalUrl}
+                onChange={e => setIcalUrl(e.target.value)}
+                rows={3}
+                placeholder="Paste the iCal URL here — starts with https://calendar.google.com/calendar/ical/..."
+                style={{ ...inp, fontFamily:'monospace', resize:'vertical', lineHeight:1.6, border:`1px solid ${icalUrl ? C.gold : C.border}` }}
+              />
             </div>
-          </button>
-
-          {/* Divider */}
-          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <div style={{ flex:1, height:1, background:C.border }} />
-            <span style={{ fontSize:12, color:C.dimmer }}>or paste manually</span>
-            <div style={{ flex:1, height:1, background:C.border }} />
-          </div>
-
-          {/* Manual URL */}
-          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:12, padding:'20px' }}>
-            <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-              <div>
-                <label style={{ fontSize:11, color:C.muted, display:'block', marginBottom:5, textTransform:'uppercase', letterSpacing:'0.07em' }}>Calendar URL</label>
-                <textarea
-                  value={icalUrl}
-                  onChange={e => setIcalUrl(e.target.value)}
-                  rows={2}
-                  placeholder="Paste any Google Calendar link here — webcal://, embed URL, or iCal URL"
-                  style={{ ...inp, fontFamily:'monospace', resize:'vertical', lineHeight:1.5, border:`1px solid ${icalUrl ? C.gold : C.border}` }}
-                />
+            <div style={{ display:'flex', gap:10, alignItems:'flex-end' }}>
+              <div style={{ flex:1 }}>
+                <label style={{ fontSize:11, color:C.muted, display:'block', marginBottom:6, textTransform:'uppercase', letterSpacing:'0.07em' }}>
+                  Month Label
+                </label>
+                <input value={monthLabel} onChange={e => setMonth(e.target.value)} placeholder="e.g. May2026" style={inp} />
               </div>
-              <div style={{ display:'flex', gap:10, alignItems:'flex-end' }}>
-                <div style={{ flex:1 }}>
-                  <label style={{ fontSize:11, color:C.muted, display:'block', marginBottom:5, textTransform:'uppercase', letterSpacing:'0.07em' }}>Month Label</label>
-                  <input value={monthLabel} onChange={e => setMonth(e.target.value)} placeholder="e.g. May2026" style={inp} />
-                </div>
-                <button onClick={handleManualSync} disabled={!icalUrl.trim() || !monthLabel.trim()}
-                  style={{ background:(icalUrl.trim()&&monthLabel.trim())?`linear-gradient(135deg,#c9a84c,${C.gold})`:'#1e2130', color:(icalUrl.trim()&&monthLabel.trim())?C.bg:C.dimmer, border:'none', borderRadius:8, padding:'10px 20px', fontSize:13, fontWeight:'bold', cursor:(icalUrl.trim()&&monthLabel.trim())?'pointer':'not-allowed', fontFamily:'inherit', whiteSpace:'nowrap' }}>
-                  Sync Now →
-                </button>
-              </div>
+              <button
+                onClick={runSync}
+                disabled={!icalUrl.trim() || !monthLabel.trim()}
+                style={{
+                  background: (icalUrl.trim() && monthLabel.trim()) ? `linear-gradient(135deg,#c9a84c,${C.gold})` : '#1e2130',
+                  color: (icalUrl.trim() && monthLabel.trim()) ? C.bg : C.dimmer,
+                  border:'none', borderRadius:8, padding:'10px 28px', fontSize:14,
+                  fontWeight:'bold', cursor:(icalUrl.trim()&&monthLabel.trim())?'pointer':'not-allowed',
+                  letterSpacing:'0.04em', fontFamily:'inherit', whiteSpace:'nowrap'
+                }}>
+                Sync Now →
+              </button>
             </div>
           </div>
         </div>
@@ -381,7 +282,7 @@ export default function SyncTab({ session, icpGenres = [] }) {
 
       {/* ── HISTORY ── */}
       {history.length > 0 && (
-        <div style={{ marginTop:8 }}>
+        <div>
           <div style={{ fontSize:12, color:C.dim, textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:10 }}>Sync History</div>
           <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
             {history.map(s => {
