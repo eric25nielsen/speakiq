@@ -246,22 +246,6 @@ export default function Admin({ session, profile }) {
     fetchUsers()
   }
 
-  // ── Settings ──────────────────────────────────────────────────────────────
-  const [senderEmail,    setSenderEmail]    = useState('jenniferspeakersclubrep@gmail.com')
-  const [senderEmailInput, setSenderInput] = useState('')
-  const [settingsSaved,  setSettingsSaved] = useState(false)
-
-  useEffect(() => {
-    supabase.from('app_settings').select('value').eq('key','sender_email').single()
-      .then(({ data }) => { if (data?.value) { setSenderEmail(data.value); setSenderInput(data.value) } })
-  }, [])
-
-  const saveSenderEmail = async () => {
-    await supabase.from('app_settings').upsert({ key:'sender_email', value:senderEmailInput.trim(), updated_at:new Date().toISOString() })
-    setSenderEmail(senderEmailInput.trim())
-    setSettingsSaved(true)
-    setTimeout(() => setSettingsSaved(false), 3000)
-  }
 
   // ── Interactions ─────────────────────────────────────────────────────────
   useEffect(()=>{ if(tab==='interactions') fetchInteractions() },[tab])
