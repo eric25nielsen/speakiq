@@ -32,13 +32,36 @@ export default function PublicDashboard() {
   }, [])
 
   const allGenres = useMemo(() => ['All', ...new Set(opps.map(o=>o.genre).filter(Boolean))], [opps])
-  const allMonths = useMemo(() => ['All', ...new Set(opps.map(o=>o.calendar_month).filter(Boolean))], [opps])
+  const parseEventMonth = (dateStr) => {
+    if (!dateStr) return null
+    const months = ['January','February','March','April','May','June','July','August','September','October','November','December']
+    const abbr   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    for (let i = 0; i < months.length; i++) {
+      const re = new RegExp(`(${months[i]}|${abbr[i]})\.?[^\d]*(202[5-9]|203\d)`, 'i')
+      const m = dateStr.match(re)
+      if (m) return `${months[i]} ${m[2]}`
+    }
+    const yearMatch = dateStr.match(/\b(202[5-9]|203\d)\b/)
+    if (yearMatch) return yearMatch[1]
+    return null
+  }
+
+  const allMonths = useMemo(() => {
+    const months = [...new Set(opps.map(o => parseEventMonth(o.date)).filter(Boolean))]
+    months.sort((a, b) => {
+      const order = ['January','February','March','April','May','June','July','August','September','October','November','December']
+      const [aM, aY] = a.split(' '); const [bM, bY] = b.split(' ')
+      if (aY !== bY) return parseInt(aY) - parseInt(bY)
+      return order.indexOf(aM) - order.indexOf(bM)
+    })
+    return months.length > 0 ? ['All', ...months] : ['All']
+  }, [opps])
 
   const filtered = useMemo(() => {
     let list = [...opps]
     if (search)          list = list.filter(o => JSON.stringify(o).toLowerCase().includes(search.toLowerCase()))
     if (filterGenre !== 'All') list = list.filter(o => o.genre === filterGenre)
-    if (filterMonth !== 'All') list = list.filter(o => o.calendar_month === filterMonth)
+    if (filterMonth !== 'All') list = list.filter(o => parseEventMonth(o.date) === filterMonth)
     if (filterState)     list = list.filter(o => (o.location||'').toLowerCase().includes(filterState.toLowerCase()))
     list.sort((a,b) =>
       sortBy === 'score' ? b.icp_score - a.icp_score :

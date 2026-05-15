@@ -81,7 +81,35 @@ export default function Dashboard({ session, profile }) {
   }
 
   const allGenres = useMemo(() => ['All', ...new Set(opps.map(o=>o.genre).filter(Boolean))], [opps])
-  const allMonths = useMemo(() => { const months = [...new Set(opps.map(o=>o.calendar_month).filter(Boolean))]; return months.length > 0 ? ['All', ...months] : ['All'] }, [opps])
+  // Parse event month from actual date field e.g. "November 5-7, 2026" -> "November 2026"
+  const parseEventMonth = (dateStr) => {
+    if (!dateStr) return null
+    const months = ['January','February','March','April','May','June','July','August','September','October','November','December']
+    const abbr   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    // Match "Month YYYY" or "Month Day, YYYY"
+    for (let i = 0; i < months.length; i++) {
+      const re = new RegExp(`(${months[i]}|${abbr[i]})\.?[^\d]*(202[5-9]|203\d)`, 'i')
+      const m = dateStr.match(re)
+      if (m) return `${months[i]} ${m[2]}`
+    }
+    // Just a year
+    const yearMatch = dateStr.match(/\b(202[5-9]|203\d)\b/)
+    if (yearMatch) return yearMatch[1]
+    return null
+  }
+
+  const allMonths = useMemo(() => {
+    const months = [...new Set(opps.map(o => parseEventMonth(o.date)).filter(Boolean))]
+    // Sort chronologically
+    months.sort((a, b) => {
+      const monthOrder = ['January','February','March','April','May','June','July','August','September','October','November','December']
+      const [aMonth, aYear] = a.split(' ')
+      const [bMonth, bYear] = b.split(' ')
+      if (aYear !== bYear) return parseInt(aYear) - parseInt(bYear)
+      return monthOrder.indexOf(aMonth) - monthOrder.indexOf(bMonth)
+    })
+    return months.length > 0 ? ['All', ...months] : ['All']
+  }, [opps])
 
   // Apply dynamic ICP scoring based on current genres
   const scoredOpps = useMemo(() => opps.map(o => ({ ...o, dynamicScore: calcScore(o) })), [opps, calcScore])
@@ -90,7 +118,7 @@ export default function Dashboard({ session, profile }) {
     let list = [...scoredOpps]
     if (search)          list = list.filter(o => JSON.stringify(o).toLowerCase().includes(search.toLowerCase()))
     if (filterGenre !== 'All') list = list.filter(o => o.genre === filterGenre)
-    if (filterMonth !== 'All') list = list.filter(o => o.calendar_month === filterMonth)
+    if (filterMonth !== 'All') list = list.filter(o => parseEventMonth(o.date) === filterMonth)
     if (filterState)     list = list.filter(o => (o.location||'').toLowerCase().includes(filterState.toLowerCase()))
     if (filterBM)        list = list.filter(o => bookmarks.has(o.id))
     list.sort((a,b) =>
@@ -99,7 +127,7 @@ export default function Dashboard({ session, profile }) {
       (a.title||'').localeCompare(b.title||'')
     )
     return list
-  }, [scoredOpps, search, filterGenre, filterMonth, filterState, filterBM, sortBy, bookmarks])
+  }, [scoredOpps, search, filterGenre, filterMonth, filterState, filterBM, sortBy, bookmarks, parseEventMonth])
 
   const exportCSV = () => {
     const h = ['#','Title','Date','Location','Organization','Genre','Format','Contact','Email','Phone','Fee','ICP Score','Details','Month']
