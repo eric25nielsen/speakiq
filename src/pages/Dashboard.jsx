@@ -12,8 +12,6 @@ const C = {
 
 const scoreColor = (s) => s >= 75 ? C.green : s >= 45 ? C.orange : C.red
 
-  const [, forceUpdate] = useState(0)
-
 const sel = {
   background:'#1a1d28', color:C.text, border:`1px solid #2a2d3a`,
   borderRadius:6, padding:'8px 12px', fontSize:13, fontFamily:'inherit', outline:'none',
