@@ -81,7 +81,7 @@ export default function Dashboard({ session, profile }) {
   }
 
   const allGenres = useMemo(() => ['All', ...new Set(opps.map(o=>o.genre).filter(Boolean))], [opps])
-  const allMonths = useMemo(() => ['All', ...new Set(opps.map(o=>o.calendar_month).filter(Boolean))], [opps])
+  const allMonths = useMemo(() => { const months = [...new Set(opps.map(o=>o.calendar_month).filter(Boolean))]; return months.length > 0 ? ['All', ...months] : ['All'] }, [opps])
 
   // Apply dynamic ICP scoring based on current genres
   const scoredOpps = useMemo(() => opps.map(o => ({ ...o, dynamicScore: calcScore(o) })), [opps, calcScore])
